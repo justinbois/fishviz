@@ -1,9 +1,14 @@
 import argparse
 
+import numpy as np
+import pandas as pd
+
 import bokeh.io
 import bokeh.models
 import bokeh.palettes
 import bokeh.plotting
+
+import data_parser
 
 
 def nights(df):
@@ -142,18 +147,19 @@ if __name__ == '__main__':
 
     # Parse data Frames
     if args.tidy:
-        df = load_tidy_activity(args.activity_file)
+        df = data_parser.load_tidy_activity(args.activity_file)
     elif args.perl_processed:
-        df_gt = load_gtype(args.gtype_file)
-        df = load_perl_processed_activity(args.activity_file, df_gt)
+        df_gt = data_parser.load_gtype(args.gtype_file)
+        df = data_parser.load_perl_processed_activity(args.activity_file, df_gt)
     else:
         lights_on = pd.to_datetime(args.lights_on).time()
         lights_off = pd.to_datetime(args.lights_off).time()
-        df = load_data(args.activity_file, args.gtype_file, lights_on,
-                       lights_off, int(args.day_in_the_life))
+        df = data_parser.load_data(
+                 args.activity_file, args.gtype_file, lights_on,
+                 lights_off, int(args.day_in_the_life))
 
     # Resample the data
-    df_resampled = resample(df, int(args.ind_win))
+    df_resampled = data_parser.resample(df, int(args.ind_win))
 
     # Get approximate time interval of averages
     inds = df_resampled.fish==df_resampled.fish.unique()[0]
