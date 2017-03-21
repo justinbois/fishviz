@@ -121,26 +121,29 @@ if __name__ == '__main__':
                 help='Number of time points to use in averages (default 10)')
     parser.add_argument('--lightson', '-l', action='store', dest='lights_on',
                         default='9:00:00',
-                help='time that lights come on, e.g., 9:00:00')
+                help='time that lights come on, e.g., 9:00:00 (default)')
     parser.add_argument('--lightsoff', '-d', action='store', dest='lights_off',
                         default='23:00:00',
-                help='time that lights go off, e.g., 23:00:00')
+                help='time that lights go off, e.g., 23:00:00 (default)')
     parser.add_argument('--startday', '-D', action='store',
                         dest='day_in_the_life', default=5,
-                help="Day in zebrafish's life that experiment began" )
+            help="Day in zebrafish's life that experiment began (default 5)" )
     parser.add_argument('--gtype', '-g', action='store', dest='gtype_file',
-                        help='name of file containing genotypes')
+        help="name of file containing genotypes (req'd unles --tidy selected)")
     parser.add_argument('--activity', '-a', action='store',
-                        dest='activity_file',
+                        dest='activity_file', required=True,
                         help='name of file containing activity data')
     parser.add_argument('--out', '-o', action='store',
-                        dest='html_file',
+                        dest='html_file', required=True,
                         help='name of file to store output')
     parser.add_argument('--tidy', '-t', action='store_true', dest='tidy',
-                        default=False)
+                        default=False,
+                        help='If data set is already tidied.')
     parser.add_argument('--perl_processed', '-p', action='store_true',
-                        dest='perl_processed', default=False)
+                        dest='perl_processed', default=False,
+            help='If data set already pre-processed by Prober lab Perl script.')
     args = parser.parse_args()
+
 
     # Specify output
     bokeh.io.output_file(args.html_file, title='fish sleep explorer')
