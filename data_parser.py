@@ -4,6 +4,17 @@ import numpy as np
 import pandas as pd
 
 
+def tidy_data(activity_name, genotype_name, out_name, lights_on, lights_off,
+              day_in_the_life, resample_win=1, extra_cols=[],
+              rename={'middur': 'activity'}):
+    """Write a tidy data file"""
+    df = load_data(activity_name, genotype_name, lights_on, lights_off,
+                   day_in_the_life, extra_cols=extra_cols, rename=rename)
+    df = resample(df, resample_win)
+    df.to_csv(out_name, index=False)
+    return None
+
+
 def load_gtype(fname):
     """Read genotype file into tidy DataFrame"""
     # Read file
@@ -31,6 +42,13 @@ def load_gtype(fname):
 def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
               extra_cols=[], rename={'middur': 'activity'}):
     """Load in activity to DataFrame."""
+
+    # Convert lightson and lightsoff to datetime.time objects
+    if type(lights_on) != datetime.time:
+        lights_on = pd.to_datetime(lights_on).time()
+    if type(lights_off) != datetime.time:
+        lights_off = pd.to_datetime(lights_off).time()
+
     # Get genotype information
     df_gt = load_gtype(genotype_fname)
 
@@ -78,6 +96,12 @@ def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
     # Sort by fish and zeit
     df = df.sort_values(by=['fish', 'zeit']).reset_index(drop=True)
 
+    # Set up zeit indices
+    for fish in df['fish'].unique():
+        df.loc[df['fish']==fish, 'zeit_ind'] = np.arange(
+                                                    np.sum(df['fish']==fish))
+    df['zeit_ind'] = df['zeit_ind'].astype(int)
+
     # Return everything if we don't want to delete anything
     if 'sttime' not in extra_cols:
         usecols.remove('sttime')
@@ -85,7 +109,8 @@ def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
         usecols.remove('stdate')
     usecols.remove('location')
 
-    cols = usecols + ['time', 'fish', 'genotype', 'zeit', 'light', 'day']
+    cols = usecols + ['time', 'fish', 'genotype', 'zeit', 'zeit_ind',
+                      'light', 'day']
     df = df[cols]
 
     # Rename columns
@@ -191,7 +216,8 @@ def resample(df, ind_win):
     # If no resampling is necessary
     n_fish = len(df_in.fish.unique())
     if ind_win == 1:
-        zeit_ind = list(range(np.sum(df_in.fish==df_in.fish.unique()[0]))) * n_fish
+        zeit_ind = list(range(np.sum(df_in.fish==df_in.fish.unique()[0]))) \
+                            * n_fish
         df_in['zeit_ind'] = zeit_ind
         return df_in
 
