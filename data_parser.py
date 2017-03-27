@@ -7,7 +7,60 @@ import pandas as pd
 def tidy_data(activity_name, genotype_name, out_name, lights_on, lights_off,
               day_in_the_life, resample_win=1, extra_cols=[],
               rename={'middur': 'activity'}):
-    """Write a tidy data file"""
+    """
+    Load in activity data and write tidy data file.
+
+    Parameters
+    ----------
+    fname : string
+        CSV file containing the activity data. This is a conversion
+        to CSV of the Excel file that comes off the instrument.
+    genotype_fname : string
+        File containing genotype information. This is in standard
+        Prober lab format, with tab delimited file.
+        - First row discarded
+        - Second row contains genotypes. String is only kept up to
+          the last space because they typically appear something like
+          'tph2-/- (n=20)', and we do not need the ' (n=20)'.
+        - Subsequent rows containg wells in the 96 well plate
+          corresponding to each genotype.
+    out_name : string
+        Name of file to write tidy DataFrame to.
+    lights_on : string or datetime.time instance
+        The time where lights come on each day, e.g., '9:00:00'.
+    lights_off: string or datetime.time instance
+        The time where lights go off each day, e.g., '23:00:00'.
+    day_in_the_life : int
+        The day in the life of the embryos when data acquisition
+        started.
+    resample_win : int, default 1
+        Size of resampling window.
+    extra_cols : list, default []
+        List of extra columns to keep from the input file, e.g.,
+        ['frect', 'fredur']. By default, only time, fish ID, and
+        activity as measured by 'middur' is kept.
+    rename : dict, default {'middur': 'activity'}
+        Dictionary for renaming column headings.
+
+    Notes
+    -----
+    .. Writes a tidy data set with columns:
+        - activity: The activity over the time interval
+        - time: time in proper datetime format
+        - fish: ID of the fish
+        - genotype: genotype of the fish
+        - zeit: Zeitgeber time
+        - zeit_ind: an index for the Zeitgeber time. Because of some
+          errors in the acquisition, sometimes the times do not
+          perfectly line up. zeit_ind is just the index of the
+          measurement. This is needed for computing averages over
+          fish at each time point.
+        - light: True if the light is on.
+        - day: The day in the life of the fish
+    .. The column 'zeit' contains the Zeitgeber time, and is
+       calculated from the time stamps in the original data
+       set, *not* from the 'start' and 'end' columns.
+    """
     df = load_data(activity_name, genotype_name, lights_on, lights_off,
                    day_in_the_life, extra_cols=extra_cols, rename=rename)
     df = resample(df, resample_win)
@@ -16,7 +69,28 @@ def tidy_data(activity_name, genotype_name, out_name, lights_on, lights_off,
 
 
 def load_gtype(fname):
-    """Read genotype file into tidy DataFrame"""
+    """
+    Read genotype file into tidy DataFrame
+
+    Parameters
+    ----------
+    fname : string
+        File containing genotype information. This is in standard
+        Prober lab format, with tab delimited file.
+        - First row discarded
+        - Second row contains genotypes. String is only kept up to
+          the last space because they typically appear something like
+          'tph2-/- (n=20)', and we do not need the ' (n=20)'.
+        - Subsequent rows containg wells in the 96 well plate
+          corresponding to each genotype.
+
+    Returns
+    -------
+    df : pandas DataFrame
+        Tidy DataFrame with columns:
+        - fish: ID of fish
+        - genotype: genotype of fish
+    """
     # Read file
     df = pd.read_csv(fname, delimiter='\t', comment='#', header=[0, 1])
 
@@ -41,7 +115,60 @@ def load_gtype(fname):
 
 def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
               extra_cols=[], rename={'middur': 'activity'}):
-    """Load in activity to DataFrame."""
+    """
+    Load in activity CSV file to tidy DateFrame
+
+    Parameters
+    ----------
+    fname : string
+        CSV file containing the activity data. This is a conversion
+        to CSV of the Excel file that comes off the instrument.
+    genotype_fname : string
+        File containing genotype information. This is in standard
+        Prober lab format, with tab delimited file.
+        - First row discarded
+        - Second row contains genotypes. String is only kept up to
+          the last space because they typically appear something like
+          'tph2-/- (n=20)', and we do not need the ' (n=20)'.
+        - Subsequent rows containg wells in the 96 well plate
+          corresponding to each genotype.
+    lights_on : string or datetime.time instance
+        The time where lights come on each day, e.g., '9:00:00'.
+    lights_off: string or datetime.time instance
+        The time where lights go off each day, e.g., '23:00:00'.
+    day_in_the_life : int
+        The day in the life of the embryos when data acquisition
+        started.
+    extra_cols : list, default []
+        List of extra columns to keep from the input file, e.g.,
+        ['frect', 'fredur']. By default, only time, fish ID, and
+        activity as measured by 'middur' is kept.
+    rename : dict, default {'middur': 'activity'}
+        Dictionary for renaming column headings.
+
+    Returns
+    -------
+    df : pandas DataFrame
+        Tidy DataFrame with columns:
+        - activity: The activity as given by the instrument
+        - time: time in proper datetime format
+        - fish: ID of the fish
+        - genotype: genotype of the fish
+        - zeit: Zeitgeber time
+        - zeit_ind: an index for the Zeitgeber time. Because of some
+          errors in the acquisition, sometimes the times do not
+          perfectly line up. zeit_ind is just the index of the
+          measurement. This is needed for computing averages over
+          fish at each time point.
+        - light: True if the light is on.
+        - day: The day in the life of the fish
+
+    Notes
+    -----
+    .. The column 'zeit' contains the Zeitgeber time, and is
+       calculated from the time stamps in the original data
+       set, *not* from the 'start' and 'end' columns.
+    """
 
     # Convert lightson and lightsoff to datetime.time objects
     if type(lights_on) != datetime.time:
@@ -203,7 +330,7 @@ def load_perl_processed_activity(activity_file, df_gt):
     return df
 
 
-def resample(df, ind_win):
+def resample(df, ind_win, center=True):
     """
     Resample the DataFrame.
     """
@@ -225,7 +352,8 @@ def resample(df, ind_win):
     df_gb = df_in.groupby('fish')['activity']
 
     # Compute rolling sum
-    s = df_gb.rolling(window=ind_win).sum().reset_index(level=0, drop='fish')
+    s = df_gb.rolling(window=ind_win, center=center).sum().reset_index(
+                                                        level=0, drop='fish')
     df_in['window'] = s
 
     # Index of right edge of 1st averaging win. (ensure win. ends at lights out)
