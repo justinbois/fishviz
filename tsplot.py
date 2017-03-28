@@ -31,7 +31,7 @@ def dark(df, time, light):
         Time points for right side of dark bars
     """
     zeit = df[time].reset_index(drop=True)
-    lefts = zeit[np.where(np.diff(df[light].astype(int)) == -1)[0]].values
+    lefts = zeit[np.where(np.diff(df[light].astype(int)) == -1)[0] + 1].values
     rights = zeit[np.where(np.diff(df[light].astype(int)) == 1)[0]].values
     return lefts, rights
 
@@ -316,7 +316,7 @@ def get_colors(cats):
             colors[cat][0]: hex value for color of all time series
             colors[cat][1]: hex value for color of summary trace
         Colors are generated using paired ColorBrewer colors,
-        with a maximum of six categories.    
+        with a maximum of six categories.
     """
     if len(cats) > 6:
         raise RuntimeError('Maxium of 6 categoriess allowed.')

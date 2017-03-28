@@ -150,11 +150,14 @@ def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
     -------
     df : pandas DataFrame
         Tidy DataFrame with columns:
-        - activity: The activity as given by the instrument
-        - time: time in proper datetime format
+        - activity: The activity as given by the instrument, based
+          on the `middur` columns of the inputted data set
+        - time: time in proper datetime format, based on the `sttime`
+          column of the inputted data file
         - fish: ID of the fish
         - genotype: genotype of the fish
-        - zeit: Zeitgeber time
+        - zeit: Zeitgeber time, based on the `start` column of the
+          inputted data file
         - zeit_ind: an index for the Zeitgeber time. Because of some
           errors in the acquisition, sometimes the times do not
           perfectly line up. zeit_ind is just the index of the
@@ -182,7 +185,7 @@ def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
     # Determine which columns to read in
     if extra_cols is None:
         extra_cols = []
-    cols = ['location', 'stdate', 'sttime', 'middur']
+    cols = ['start', 'location', 'stdate', 'sttime', 'middur']
     new_cols = list(set(extra_cols) - set(cols))
     usecols = cols + new_cols
 
@@ -209,7 +212,7 @@ def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
     t_min = pd.DatetimeIndex(df['time']).min()
 
     # Get Zeitgeber time in units of hours
-    df['zeit'] = (df['time'] - t_min).dt.total_seconds() / 3600
+    df['zeit'] = df['start'] / 3600
 
     # Determine light or dark
     clock = pd.DatetimeIndex(df['time']).time
@@ -234,6 +237,8 @@ def load_data(fname, genotype_fname, lights_on, lights_off, day_in_the_life,
         usecols.remove('sttime')
     if 'stdate' not in extra_cols:
         usecols.remove('stdate')
+    if 'start' not in extra_cols:
+        usecols.remove('start')
     usecols.remove('location')
 
     cols = usecols + ['time', 'fish', 'genotype', 'zeit', 'zeit_ind',
@@ -330,7 +335,7 @@ def load_perl_processed_activity(activity_file, df_gt):
     return df
 
 
-def resample(df, ind_win, center=True):
+def resample(df, ind_win, label='center'):
     """
     Resample the DataFrame.
     """
@@ -341,40 +346,57 @@ def resample(df, ind_win, center=True):
     df_in = df_in.sort_values(by=['fish', 'zeit']).reset_index(drop=True)
 
     # If no resampling is necessary
-    n_fish = len(df_in.fish.unique())
     if ind_win == 1:
-        zeit_ind = list(range(np.sum(df_in.fish==df_in.fish.unique()[0]))) \
-                            * n_fish
-        df_in['zeit_ind'] = zeit_ind
         return df_in
+
+    # Extract  light
+    light = df_in.loc[df_in['fish']==df_in['fish'].unique()[0], 'light'].values
+
+    # Find first light switching event
+    if light[0]:
+        where_false = np.where(~light)[0]
+        if len(where_false) == 0:
+            first_ind = 0
+        else:
+            first_ind = where_false[0]
+    else:
+        where_true = np.where(light)[0]
+        if len(where_true) == 0:
+            first_ind = 0
+        else:
+            first_ind = where_true[0]
+
+    # Determine start index for averaging
+    if first_ind < ind_win:
+        start_ind = first_ind
+    else:
+        start_ind = first_ind % ind_win
 
     # Make GroupBy object
     df_gb = df_in.groupby('fish')['activity']
 
-    # Compute rolling sum
-    s = df_gb.rolling(window=ind_win, center=center).sum().reset_index(
-                                                        level=0, drop='fish')
-    df_in['window'] = s
-
-    # Index of right edge of 1st averaging win. (ensure win. ends at lights out)
-    light = df_in.loc[df_in.fish==df_in.fish.unique()[0], 'light']
-    start_ind = ind_win \
-                + np.where(np.diff(light.values.astype(int)))[0][0] % ind_win
+    # Compute rolling sum (result is stored at right end of window)
+    s = df_gb.rolling(window=ind_win).sum().reset_index(level=0, drop='fish')
 
     # Inds to keep
     inds = np.array([])
+    win_inds = np.array([])
     for fish in df_in.fish.unique():
-        start = df_in.loc[df_in.fish==fish, :].index[0] + start_ind
-        stop = df_in.loc[df_in.fish==fish, :].index[-1]
-        inds = np.concatenate((inds, np.arange(start, stop, ind_win)))
+        start = df_in.loc[df_in.fish==fish, :].index[0] \
+                                            + start_ind + ind_win - 1
+        stop = df_in.loc[df_in.fish==fish, :].index[-1] + 1
+        new_inds = np.arange(start, stop, ind_win)
+        inds = np.concatenate((inds, new_inds - ind_win + 1))
+        win_inds = np.concatenate((win_inds, new_inds))
 
     # Zeit indices
+    n_fish = len(df_in.fish.unique())
     zeit_ind = list(range(int(len(inds) // n_fish))) * n_fish
 
     # New DataFrame
-    new_cols = ['time', 'fish', 'genotype', 'day', 'light', 'zeit', 'window']
+    new_cols = ['time', 'fish', 'genotype', 'day', 'light', 'zeit']
     df_resampled = df_in.loc[inds, new_cols].reset_index(drop=True)
+    df_resampled['activity'] = s[win_inds].values
     df_resampled['zeit_ind'] = zeit_ind
-    df_resampled = df_resampled.rename(columns={'window': 'activity'})
 
     return df_resampled
