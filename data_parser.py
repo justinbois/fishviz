@@ -372,7 +372,7 @@ def resample(df, ind_win, center=True):
     zeit_ind = list(range(int(len(inds) // n_fish))) * n_fish
 
     # New DataFrame
-    new_cols = ['fish', 'genotype', 'day', 'light', 'zeit', 'window']
+    new_cols = ['time', 'fish', 'genotype', 'day', 'light', 'zeit', 'window']
     df_resampled = df_in.loc[inds, new_cols].reset_index(drop=True)
     df_resampled['zeit_ind'] = zeit_ind
     df_resampled = df_resampled.rename(columns={'window': 'activity'})
