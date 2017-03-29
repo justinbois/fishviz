@@ -1,4 +1,3 @@
-# fishviz
-Visualization of fish data
+# DEPRECATED
 
-Tools for vizualization of data from video tracking experiments of fish sleep.
+Superceded by [tsplot](https://github.com/justinbois/tsplot) and [fishactivity](https://github.com/justinbois/fishactivity).
