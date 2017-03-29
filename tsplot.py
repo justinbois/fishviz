@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 import numba
+
 import tqdm
 
 import bokeh.models
@@ -13,6 +14,7 @@ import bokeh.plotting
 def draw_bs_sample(data):
     return np.random.choice(data, size=len(data))
 
+
 @numba.jit(nopython=True)
 def draw_bs_reps_mean(data, size=1000):
     bs_reps = np.empty(size)
@@ -20,12 +22,14 @@ def draw_bs_reps_mean(data, size=1000):
         bs_reps[i] = np.mean(draw_bs_sample(data))
     return bs_reps
 
+
 @numba.jit(nopython=True)
 def draw_bs_reps_median(data, size=1000):
     bs_reps = np.empty(size)
     for i in range(size):
         bs_reps[i] = np.median(draw_bs_sample(data))
     return bs_reps
+
 
 def bs_conf_int(data, ptiles, stat='mean', size=1000):
     if stat == 'mean':
@@ -37,8 +41,9 @@ def bs_conf_int(data, ptiles, stat='mean', size=1000):
 
     return np.percentile(bs_reps, ptiles)
 
-def ts_conf_int(df, signal, time, ptiles, stat='mean',
-                time_ind=None, size=1000):
+
+def ts_conf_int(df, time, signal, ptiles, stat='mean', time_ind=None,
+                size=1000):
     """
     Compute bootstrap confidence intervals on time series data.
     """
@@ -98,9 +103,9 @@ def dark(df, time, light):
     rights : ndarray
         Time points for right side of dark bars
     """
-    zeit = df[time].reset_index(drop=True)
-    lefts = zeit[np.where(np.diff(df[light].astype(int)) == -1)[0] + 1].values
-    rights = zeit[np.where(np.diff(df[light].astype(int)) == 1)[0]].values
+    t = df[time].reset_index(drop=True)
+    lefts = t[np.where(np.diff(df[light].astype(int)) == -1)[0] + 1].values
+    rights = t[np.where(np.diff(df[light].astype(int)) == 1)[0]].values
     return lefts, rights
 
 
@@ -128,6 +133,11 @@ def shift_time_points(t, s, time_shift):
         Shifted time points
     s_shift : ndarray
         Appropriately adjusted signal.
+
+    Notes
+    -----
+    .. Assumes that the input is aligned on the left of the time
+       intervals.
     """
     if time_shift not in ['left', 'center', 'right', 'interval']:
         raise RuntimeError("`time_shift` must be one of {'left', 'center', 'right', 'interval'}.")
@@ -159,9 +169,10 @@ def shift_time_points(t, s, time_shift):
     return new_t, new_s
 
 
-def time_series_plot(p, df, identifier, time, signal, time_ind=None,
-                     colors=None, alpha=0.75, hover_color='#535353', title=None,
-                     summary_trace='mean', time_shift='left', legend=None):
+def time_series_plot(p, df, time, signal, identifier, time_ind=None,
+                     summary_trace='mean', time_shift='left', alpha=0.75,
+                     hover_color='#535353', colors=None, title=None,
+                     legend=None):
     """
     Make a plot of multiple time series with a summary statistic.
 
@@ -172,32 +183,26 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
         with the canvas() function.
     df : pandas DataFrame
         Tidy DataFrame minimally with columns:
-        - identifier: ID of each time series
         - time: The time points; should be the same for each ID
         - signal: The y-axis of the time series
-        - time_ind: (optional) Indices of time points for use in
-                    computing summary statistics in case the time
-                    points for all IDs are slightly off.
-    identifier : string or any acceptable pandas index
-        The name of the column in `df` containing the IDs
+        - identifier: ID of each time series
+        Optionally:
+        - time_ind: Indices of time points for use in computing
+            summary statistics. Useful when the time points are
+            floats.
+        Note that if the DataFrame has a category column,
+        this is ignored and all time serires are plotted.
     time : string or any acceptable pandas index
         The name of the column in `df` containing the time points
     signal : string or any acceptable pandas index
         The name of the column in `df` containing the y-values
+    identifier : string or any acceptable pandas index
+        The name of the column in `df` containing the IDs
     time_ind : string or any acceptable pandas index
         The name of the column in `df` containing the time indices
         to be used in computing summary statistics. These values
         are used to do a groupby. Default is the column given by
         `time`.
-    colors : list or tuple of length 2, default ['#a6cee3', '#1f78b4']
-        colors[0]: hex value for color of all time series
-        colors[1]: hex value for color of summary trace
-    alpha : float, default 0.75
-        alpha value for individual time traces
-    hover_color : string, default '#535353'
-        Hex value for color when hovering over a curve
-    title : string or None, default None
-        Title of plot.
     summary_trace : string, float, or None, default 'mean'
         Which summary statistic to use to make summary trace. If a
         string, can one of 'mean', 'median', 'max', or 'min'. If
@@ -210,6 +215,15 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
         center: Align time points to the center of the interval
         interval: Plot the signal as a horizontal line segment
                   over the time interval
+    alpha : float, default 0.75
+        alpha value for individual time traces
+    hover_color : string, default '#535353'
+        Hex value for color when hovering over a curve
+    colors : list or tuple of length 2, default ['#a6cee3', '#1f78b4']
+        colors[0]: hex value for color of all time series
+        colors[1]: hex value for color of summary trace
+    title : string or None, default None
+        Title of plot.
     legend :  str or None, default None
         Legend text for summary line.
 
@@ -234,9 +248,6 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
 
     if time_ind is None:
         time_ind = time
-
-    if not legend:
-        leg = None
 
     # Make the lines for display
     ml = []
@@ -292,18 +303,28 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
     return p
 
 
-def canvas(df, identifier, height=350, width=650, x_axis_label='time',
-           y_axis_label=None, light=None, time=None):
+def canvas(df=None, time=None, identifier=None, light=None, height=350,
+           width=650, x_axis_label='time', y_axis_label=None):
     """
     Make a Bokeh Figure instance for plotting time series.
 
     Parameters
     ----------
     df : pandas DataFrame
-        Tidy DataFrame minimally with columns:
-        - identifier: ID of each time series
-    identifier : string or any acceptable pandas index
-        The name of the column in `df` containing the IDs
+        Tidy DataFrame. Must have columns:
+        - identifier: ID of each time series, if `light` is not None
+        - time: time points for time series, if `light` is not None
+        - light: Column of Booleans for if light is on, if `light`
+            is not None
+    time : string or None or any acceptable pandas index, default None
+        The name of the column in `df` containing the time points.
+        Ignored is `light` is None. Otherwise, `time` cannot be None.
+    identifier : string or any acceptable pandas index, or None
+        The name of the column in `df` containing the IDs. Used with
+        the hover tool.
+    light : string or None or any acceptable pandas index, default None
+        Column containing Booleans for where the plot background
+        is light. If None, no shaded bars are present on the figure.
     height : int, default 350
         Height of plot in pixels.
     width : int, default 650
@@ -312,12 +333,6 @@ def canvas(df, identifier, height=350, width=650, x_axis_label='time',
         x-axis label.
     y_axis_label : string or None, default None
         y-axis label
-    light : string or None or any acceptable pandas index, default None
-        Column containing Booleans for where the plot background
-        is light. If None, no shaded bars are present on the figure.
-    time : string or None or any acceptable pandas index, default None
-        The name of the column in `df` containing the time points.
-        Ignored is `light` is None. Otherwise, `time` cannot be None.
 
     Returns
     -------
@@ -330,6 +345,9 @@ def canvas(df, identifier, height=350, width=650, x_axis_label='time',
                               x_axis_label=x_axis_label,
                               y_axis_label=y_axis_label,
                               tools='pan,box_zoom,wheel_zoom,reset,resize,save')
+
+    if df is None:
+        return p
 
     if light is not None:
         if time is None:
@@ -348,16 +366,17 @@ def canvas(df, identifier, height=350, width=650, x_axis_label='time',
         p.renderers.extend(dark_boxes)
 
     # Add a HoverTool to highlight individuals
-    p.add_tools(bokeh.models.HoverTool(
-            tooltips=[(identifier, '@'+identifier)], names=['hover']))
+    if identifier is not None:
+        p.add_tools(bokeh.models.HoverTool(
+                tooltips=[(identifier, '@'+identifier)], names=['hover']))
 
     return p
 
 
-def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
-         hover_color='#535353', summary_trace='mean', height=200, width=650,
-         x_axis_label='time', y_axis_label=None, light=None, colors=None,
-         show_title=True, time_shift='left'):
+def grid(df, time, signal, category, identifier, time_ind=None, light=None,
+         summary_trace='mean', time_shift='left', alpha=0.75,
+         hover_color='#535353', height=200, width=650,
+         x_axis_label='time', y_axis_label=None, colors=None, show_title=True):
     """
     Generate a set of plots of time series.
 
@@ -365,26 +384,40 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
     ----------
     df : pandas DataFrame
         Tidy DataFrame minimally with columns:
-        - identifier: ID of each time series
         - time: The time points; should be the same for each ID
         - signal: The y-axis of the time series
-        - time_ind: (optional) Indices of time points for use in
-                    computing summary statistics in case the time
-                    points for all IDs are slightly off.
-    identifier : string or any acceptable pandas index
-        The name of the column in `df` containing the IDs
-    category : string or any acceptable pandas index
-        The name of the column in `df` that is used to group time
-        series into respective subplots.
+        - category: Categorization of each time series. I.e., each
+            individual time trace belongs to a single category.
+        - identifier: ID of each time series
+        Optionally, can have columns
+        - time_ind: Indices of time points for use in computing
+            summary statistics. Useful when the time points are
+            floats.
+        - light: Column of Booleans for if light is on
     time : string or any acceptable pandas index
         The name of the column in `df` containing the time points
     signal : string or any acceptable pandas index
         The name of the column in `df` containing the y-values
+    category : string or any acceptable pandas index
+        The name of the column in `df` that is used to group time
+        series into respective subplots.
+    identifier : string or any acceptable pandas index
+        The name of the column in `df` containing the IDs
     time_ind : string or any acceptable pandas index
         The name of the column in `df` containing the time indices
         to be used in computing summary statistics. These values
         are used to do a groupby. Default is the column given by
         `time`.
+    light : string or None or any acceptable pandas index, default None
+        Column containing Booleans for where the plot background
+        is light. If None, no shaded bars are present on the figure.
+    time_shift : string, default 'left'
+        One of {'left', 'right', 'center', 'interval'}
+        left: do not perform a time shift
+        right: Align time points to right edge of interval
+        center: Align time points to the center of the interval
+        interval: Plot the signal as a horizontal line segment
+                  over the time interval
     alpha : float, default 0.75
         alpha value for individual time traces
     hover_color : string, default '#535353'
@@ -395,16 +428,13 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         None, no summary trace is generated. If a float between
         0 and 1, denotes which quantile to show.
     height : int, default 200
-        Height of plot in pixels.
+        Height of each subplot plot in pixels.
     width : int, default 650
-        Width of plot in pixels.
+        Width of each subplot in pixels.
     x_axis_label : string or None, default 'time'
         x-axis label.
     y_axis_label : string or None, default None
         y-axis label
-    light : string or None or any acceptable pandas index, default None
-        Column containing Booleans for where the plot background
-        is light. If None, no shaded bars are present on the figure.
     colors : dict, default None
         colors[cat] is a 2-list containg, for category `cat`:
             colors[cat][0]: hex value for color of all time series
@@ -413,13 +443,6 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         with a maximum of six categories.
     show_title : bool, default True
         If True, label subplots with with the category.
-    time_shift : string, default 'left'
-        One of {'left', 'right', 'center', 'interval'}
-        left: do not perform a time shift
-        right: Align time points to right edge of interval
-        center: Align time points to the center of the interval
-        interval: Plot the signal as a horizontal line segment
-                  over the time interval
 
     Returns
     -------
@@ -434,9 +457,8 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         colors = get_colors(cats)
 
     # Create figures
-    ps = [canvas(df, identifier, height=height, width=width,
-                 x_axis_label=x_axis_label, y_axis_label=y_axis_label,
-                 light=light, time=time)
+    ps = [canvas(df, time, identifier, light, height=height, width=width,
+                 x_axis_label=x_axis_label, y_axis_label=y_axis_label)
                         for _ in range(len(cats))]
 
     # Link ranges (enable linked panning/zooming)
@@ -450,69 +472,53 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         sub_df = df.loc[df[category]==cat, :]
         if show_title:
             title = cat
-        _ = time_series_plot(p, sub_df, identifier, time, signal,
-                             time_ind=time_ind, colors=colors[cat], alpha=alpha,
-                             hover_color=hover_color, title=title,
-                             summary_trace=summary_trace, time_shift=time_shift)
+        _ = time_series_plot(
+                p, sub_df, time, signal, identifier, time_ind=time_ind, summary_trace=summary_trace, time_shift=time_shift, alpha=alpha,
+                hover_color=hover_color, colors=colors[cat], title=title)
 
     return bokeh.layouts.gridplot([[ps[i]] for i in range(len(ps))])
 
 
-def summary(df, identifier, category, time, signal, time_ind=None, alpha=0.5,
-            summary_trace='mean', height=350, width=650, x_axis_label='time',
-            y_axis_label=None, light=None, colors=None, time_shift='left',
-            ptiles=(2.5, 97.5), n_bs_reps=1000):
+def summary(df, time, signal, category, identifier, time_ind=None, light=None,
+            summary_trace='mean', time_shift='left', confint=True,
+            ptiles=(2.5, 97.5), n_bs_reps=1000, alpha=0.25, height=350,
+            width=650, x_axis_label='time', y_axis_label=None, colors=None):
     """
     Generate a set of plots of time series.
 
     Parameters
     ----------
-    df : pandas DataFrame
         Tidy DataFrame minimally with columns:
-        - identifier: ID of each time series
         - time: The time points; should be the same for each ID
         - signal: The y-axis of the time series
-        - time_ind: (optional) Indices of time points for use in
-                    computing summary statistics in case the time
-                    points for all IDs are slightly off.
-    identifier : string or any acceptable pandas index
-        The name of the column in `df` containing the IDs
-    category : string or any acceptable pandas index
-        The name of the column in `df` that is used to group time
-        series into respective subplots.
+        - category: Categorization of each time series. I.e., each
+            individual time trace belongs to a single category.
+        - identifier: ID of each time series
+        Optionally, can have columns
+        - time_ind: Indices of time points for use in computing
+            summary statistics. Useful when the time points are
+            floats.
+        - light: Column of Booleans for if light is on
     time : string or any acceptable pandas index
         The name of the column in `df` containing the time points
     signal : string or any acceptable pandas index
         The name of the column in `df` containing the y-values
+    category : string or any acceptable pandas index
+        The name of the column in `df` that is used to group time
+        series into respective subplots.
+    identifier : string or any acceptable pandas index
+        The name of the column in `df` containing the IDs
     time_ind : string or any acceptable pandas index
         The name of the column in `df` containing the time indices
         to be used in computing summary statistics. These values
         are used to do a groupby. Default is the column given by
         `time`.
-    alpha : float, default 0.15
-        alpha value for confidence interval
-    summary_trace : string, float, or None, default 'mean'
-        Which summary statistic to use to make summary trace. If a
-        string, can one of 'mean', 'median', 'max', or 'min'. If
-        None, no summary trace is generated. If a float between
-        0 and 1, denotes which quantile to show.
-    height : int, default 350
-        Height of plot in pixels.
-    width : int, default 650
-        Width of plot in pixels.
-    x_axis_label : string or None, default 'time'
-        x-axis label.
-    y_axis_label : string or None, default None
-        y-axis label
     light : string or None or any acceptable pandas index, default None
         Column containing Booleans for where the plot background
         is light. If None, no shaded bars are present on the figure.
-    colors : dict, default None
-        colors[cat] is a 2-list containing, for category `cat`:
-            colors[cat][0]: hex value for color of confidence interval
-            colors[cat][1]: hex value for color of summary trace
-        If none, colors are generated using paired ColorBrewer colors,
-        with a maximum of six categories.
+    summary_trace : string, default 'mean'
+        Which summary statistic to use to make summary trace. Must
+        be either 'mean' or 'median'.
     time_shift : string, default 'left'
         One of {'left', 'right', 'center', 'interval'}
         left: do not perform a time shift
@@ -520,15 +526,35 @@ def summary(df, identifier, category, time, signal, time_ind=None, alpha=0.5,
         center: Align time points to the center of the interval
         interval: Plot the signal as a horizontal line segment
                   over the time interval
+    confint : bool, default True
+        If True, also display confidence interval.
     ptiles : list or tuple of length two, default (2.5, 97.5)
-        Percentiles for confidence interval.
+        Percentiles for confidence intervals; ignored if
+        `confint` is False.
     n_bs_reps : int, default 1000
-        Number of bootstrap replicates to use in conf. int.
+        Number of bootstrap replicates to use in conf. int. Ignored if
+        `confint` is False.
+    alpha : float, default 0.25
+        alpha value for confidence intervals
+    height : int, default 200
+        Height of plot in pixels.
+    width : int, default 650
+        Width of plot in pixels.
+    x_axis_label : string or None, default 'time'
+        x-axis label.
+    y_axis_label : string or None, default None
+        y-axis label
+    colors : dict, default None
+        colors[cat] is a 2-list containg, for category `cat`:
+            colors[cat][0]: hex value for color of all time series
+            colors[cat][1]: hex value for color of summary trace
+        If none, colors are generated using paired ColorBrewer colors,
+        with a maximum of six categories.
 
     Returns
     -------
-    output : Bokleh grid plot
-        Bokeh figure with subplots of all time series
+    output : Bokleh plot
+        Bokeh figure with summary plots
     """
     # Get the categories
     cats = df[category].unique()
@@ -546,18 +572,18 @@ def summary(df, identifier, category, time, signal, time_ind=None, alpha=0.5,
     high = 'high_' + signal
 
     # Create figures
-    p = canvas(df, identifier, height=height, width=width,
-               x_axis_label=x_axis_label, y_axis_label=y_axis_label,
-               light=light, time=time)
+    p = canvas(df, time, identifier, light, height=height, width=width,
+               x_axis_label=x_axis_label, y_axis_label=y_axis_label)
 
     # Populate glyphs
     for cat in cats:
         print('Performing bootstrap estimates for {0:s}....'.format(cat))
         sub_df = df.loc[df[category]==cat, :]
         df_summ = ts_conf_int(
-                sub_df, signal, time, ptiles, stat=summary_trace,
+                sub_df, time, signal, ptiles, stat=summary_trace,
                 time_ind=time_ind, size=n_bs_reps)
 
+        # Extract and shift time points
         t, y_low = shift_time_points(df_summ[time], df_summ[low], time_shift)
         t, y_high = shift_time_points(df_summ[time], df_summ[high], time_shift)
         t, y = shift_time_points(df_summ[time], df_summ[signal], time_shift)
