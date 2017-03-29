@@ -1,10 +1,78 @@
 import numpy as np
 import pandas as pd
 
+import numba
+import tqdm
+
 import bokeh.models
 import bokeh.palettes
 import bokeh.plotting
 
+
+@numba.jit(nopython=True)
+def draw_bs_sample(data):
+    return np.random.choice(data, size=len(data))
+
+@numba.jit(nopython=True)
+def draw_bs_reps_mean(data, size=1000):
+    bs_reps = np.empty(size)
+    for i in range(size):
+        bs_reps[i] = np.mean(draw_bs_sample(data))
+    return bs_reps
+
+@numba.jit(nopython=True)
+def draw_bs_reps_median(data, size=1000):
+    bs_reps = np.empty(size)
+    for i in range(size):
+        bs_reps[i] = np.median(draw_bs_sample(data))
+    return bs_reps
+
+def bs_conf_int(data, ptiles, stat='mean', size=1000):
+    if stat == 'mean':
+        bs_reps = draw_bs_reps_mean(data, size=size)
+    elif stat == 'median':
+        bs_reps = draw_bs_reps_median(data, size=size)
+    else:
+        raise RuntimeError("`stat` must be either 'mean' or 'median'.")
+
+    return np.percentile(bs_reps, ptiles)
+
+def ts_conf_int(df, signal, time, ptiles, stat='mean',
+                time_ind=None, size=1000):
+    """
+    Compute bootstrap confidence intervals on time series data.
+    """
+    if stat not in ['mean', 'median']:
+        raise RuntimeError("`stat` must be either 'mean' or 'median'.")
+
+    # Convenience strings to reference high and los confidence interval bounds
+    low = 'low_' + signal
+    high = 'high_' + signal
+
+    # Set up output DataFrame
+    df_out = pd.DataFrame(columns=[time, time_ind, signal, low, high])
+    if time_ind is None:
+        time_ind = time
+        df_out[time] = df[time].unique()
+        df_out[time_ind] = np.arange(len(df[time].unique()))
+    else:
+        df_out[time_ind] = df[time_ind].unique()
+        t = [df.loc[df[time_ind]==i, time].iloc[0]
+                            for i in df[time_ind].unique()]
+        df_out[time] = t
+
+    # Get bootstrap estimates
+    for ind in tqdm.tqdm(df[time_ind].unique()):
+        data = df.loc[df[time_ind] == ind, signal].values
+        conf_int = bs_conf_int(data, ptiles, stat=stat, size=size)
+        if stat == 'mean':
+            df_out.loc[df_out[time_ind]==ind, signal] = np.mean(data)
+        elif stat == 'median':
+            df_out.loc[df_out[time_ind]==ind, signal] = np.median(data)
+        df_out.loc[df_out[time_ind]==ind, low] = conf_int[0]
+        df_out.loc[df_out[time_ind]==ind, high] = conf_int[1]
+
+    return df_out
 
 
 def dark(df, time, light):
@@ -36,9 +104,64 @@ def dark(df, time, light):
     return lefts, rights
 
 
+def shift_time_points(t, s, time_shift):
+    """
+    Shift time points along intervals.
+
+    Parameters
+    ----------
+    t : ndarray
+        Time points
+    s : ndarray
+        Signal
+    time_shift : string, default 'left'
+        One of {'left', 'right', 'center', 'interval'}
+        left: do not perform a time shift
+        right: Align time points to right edge of interval
+        center: Align time points to the center of the interval
+        interval: Plot the signal as a horizontal line segment
+                  over the time interval
+
+    Returns
+    -------
+    t_shift : ndarray
+        Shifted time points
+    s_shift : ndarray
+        Appropriately adjusted signal.
+    """
+    if time_shift not in ['left', 'center', 'right', 'interval']:
+        raise RuntimeError("`time_shift` must be one of {'left', 'center', 'right', 'interval'}.")
+
+    if time_shift == 'interval':
+        new_t = np.empty(2*len(t))
+        new_t[0] = t[0]
+        new_t[1:-1:2] = t[1:]
+        new_t[2:-1:2] = t[1:]
+        new_t[-1] = 2*t[-1] - t[-2]
+
+        new_s = np.empty(2*len(s))
+        new_s[::2] = s
+        new_s[1::2] = s
+    elif time_shift == 'center':
+        new_t = np.copy(t)
+        new_t[:-1] += np.diff(t) / 2
+        new_t[-1] += (t[-1] - t[-2]) / 2
+        new_s = s
+    elif time_shift == 'right':
+        new_t = np.empty_like(t)
+        new_t[:-1] = t[1:]
+        new_t[-1] = 2*t[-1] - t[-2]
+        new_s = s
+    elif time_shift == 'left':
+        new_t = t
+        new_s = s
+
+    return new_t, new_s
+
+
 def time_series_plot(p, df, identifier, time, signal, time_ind=None,
                      colors=None, alpha=0.75, hover_color='#535353', title=None,
-                     summary_trace='mean'):
+                     summary_trace='mean', time_shift='left', legend=None):
     """
     Make a plot of multiple time series with a summary statistic.
 
@@ -80,12 +203,31 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
         string, can one of 'mean', 'median', 'max', or 'min'. If
         None, no summary trace is generated. If a float between
         0 and 1, denotes which quantile to show.
+    time_shift : string, default 'left'
+        One of {'left', 'right', 'center', 'interval'}
+        left: do not perform a time shift
+        right: Align time points to right edge of interval
+        center: Align time points to the center of the interval
+        interval: Plot the signal as a horizontal line segment
+                  over the time interval
+    legend :  str or None, default None
+        Legend text for summary line.
 
     Returns
     -------
     output : bokeh.plotting.Figure instance
         Bokeh plot populated with time series.
+
+    Notes
+    -----
+    .. Assumes that the signal, if binned, is aligned with the
+       *left* of the time interval. I.e., if df[time] = [0, 1, 2],
+       the values of df[signal] are assumed to be aggregated over
+       time intervals 0 to 1, 1 to 2, and 2 to 3.
     """
+
+    if time_shift not in ['left', 'center', 'right', 'interval']:
+        raise RuntimeError("`time_shift` must be one of {'left', 'center', 'right', 'interval'}.")
 
     if colors is None:
         colors = bokeh.palettes.brewer['Paired'][3][:2]
@@ -93,10 +235,15 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
     if time_ind is None:
         time_ind = time
 
+    if not legend:
+        leg = None
+
     # Make the lines for display
     ml = []
     for individual in df[identifier].unique():
-        sub_df = df.loc[df[identifier]==individual, [identifier, time, signal]]
+        t, s = df.loc[df[identifier]==individual, [time, signal]].values.T
+        t, s = shift_time_points(t, s, time_shift)
+        sub_df = pd.DataFrame({time: t, signal: s})
         source = bokeh.models.ColumnDataSource(sub_df)
         ml.append(p.line(x=time, y=signal, source=source, line_width=0.5,
                   alpha=alpha, color=colors[0], name='do_not_hover',
@@ -124,12 +271,16 @@ def time_series_plot(p, df, identifier, time, signal, time_ind=None,
         else:
             raise RuntimeError('Invalid summary_trace value.')
 
+        t, y = shift_time_points(t, y, time_shift)
         summary_line = p.line(t, y, line_width=3, color=colors[1],
-                              line_join='bevel')
+                              line_join='bevel', legend=legend)
 
     # Make lines for hover
     for individual in df[identifier].unique():
-        sub_df = df.loc[df[identifier]==individual, [identifier, time, signal]]
+        t, s = df.loc[df[identifier]==individual, [time, signal]].values.T
+        t, s = shift_time_points(t, s, time_shift)
+        new_id = [individual] * len(t)
+        sub_df = pd.DataFrame({time: t, signal: s, identifier: new_id})
         source = bokeh.models.ColumnDataSource(sub_df)
         p.line(x=time, y=signal, source=source, line_width=2, alpha=0,
                name='hover', line_join='bevel', hover_color=hover_color)
@@ -206,7 +357,7 @@ def canvas(df, identifier, height=350, width=650, x_axis_label='time',
 def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
          hover_color='#535353', summary_trace='mean', height=200, width=650,
          x_axis_label='time', y_axis_label=None, light=None, colors=None,
-         show_title=True):
+         show_title=True, time_shift='left'):
     """
     Generate a set of plots of time series.
 
@@ -243,7 +394,7 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         string, can one of 'mean', 'median', 'max', or 'min'. If
         None, no summary trace is generated. If a float between
         0 and 1, denotes which quantile to show.
-    height : int, default 350
+    height : int, default 200
         Height of plot in pixels.
     width : int, default 650
         Width of plot in pixels.
@@ -262,6 +413,13 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         with a maximum of six categories.
     show_title : bool, default True
         If True, label subplots with with the category.
+    time_shift : string, default 'left'
+        One of {'left', 'right', 'center', 'interval'}
+        left: do not perform a time shift
+        right: Align time points to right edge of interval
+        center: Align time points to the center of the interval
+        interval: Plot the signal as a horizontal line segment
+                  over the time interval
 
     Returns
     -------
@@ -279,7 +437,7 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
     ps = [canvas(df, identifier, height=height, width=width,
                  x_axis_label=x_axis_label, y_axis_label=y_axis_label,
                  light=light, time=time)
-                        for i in range(len(cats))]
+                        for _ in range(len(cats))]
 
     # Link ranges (enable linked panning/zooming)
     for i in range(1, len(cats)):
@@ -295,9 +453,126 @@ def grid(df, identifier, category, time, signal, time_ind=None, alpha=0.75,
         _ = time_series_plot(p, sub_df, identifier, time, signal,
                              time_ind=time_ind, colors=colors[cat], alpha=alpha,
                              hover_color=hover_color, title=title,
-                             summary_trace=summary_trace)
+                             summary_trace=summary_trace, time_shift=time_shift)
 
     return bokeh.layouts.gridplot([[ps[i]] for i in range(len(ps))])
+
+
+def summary(df, identifier, category, time, signal, time_ind=None, alpha=0.5,
+            summary_trace='mean', height=350, width=650, x_axis_label='time',
+            y_axis_label=None, light=None, colors=None, time_shift='left',
+            ptiles=(2.5, 97.5), n_bs_reps=1000):
+    """
+    Generate a set of plots of time series.
+
+    Parameters
+    ----------
+    df : pandas DataFrame
+        Tidy DataFrame minimally with columns:
+        - identifier: ID of each time series
+        - time: The time points; should be the same for each ID
+        - signal: The y-axis of the time series
+        - time_ind: (optional) Indices of time points for use in
+                    computing summary statistics in case the time
+                    points for all IDs are slightly off.
+    identifier : string or any acceptable pandas index
+        The name of the column in `df` containing the IDs
+    category : string or any acceptable pandas index
+        The name of the column in `df` that is used to group time
+        series into respective subplots.
+    time : string or any acceptable pandas index
+        The name of the column in `df` containing the time points
+    signal : string or any acceptable pandas index
+        The name of the column in `df` containing the y-values
+    time_ind : string or any acceptable pandas index
+        The name of the column in `df` containing the time indices
+        to be used in computing summary statistics. These values
+        are used to do a groupby. Default is the column given by
+        `time`.
+    alpha : float, default 0.15
+        alpha value for confidence interval
+    summary_trace : string, float, or None, default 'mean'
+        Which summary statistic to use to make summary trace. If a
+        string, can one of 'mean', 'median', 'max', or 'min'. If
+        None, no summary trace is generated. If a float between
+        0 and 1, denotes which quantile to show.
+    height : int, default 350
+        Height of plot in pixels.
+    width : int, default 650
+        Width of plot in pixels.
+    x_axis_label : string or None, default 'time'
+        x-axis label.
+    y_axis_label : string or None, default None
+        y-axis label
+    light : string or None or any acceptable pandas index, default None
+        Column containing Booleans for where the plot background
+        is light. If None, no shaded bars are present on the figure.
+    colors : dict, default None
+        colors[cat] is a 2-list containing, for category `cat`:
+            colors[cat][0]: hex value for color of confidence interval
+            colors[cat][1]: hex value for color of summary trace
+        If none, colors are generated using paired ColorBrewer colors,
+        with a maximum of six categories.
+    time_shift : string, default 'left'
+        One of {'left', 'right', 'center', 'interval'}
+        left: do not perform a time shift
+        right: Align time points to right edge of interval
+        center: Align time points to the center of the interval
+        interval: Plot the signal as a horizontal line segment
+                  over the time interval
+    ptiles : list or tuple of length two, default (2.5, 97.5)
+        Percentiles for confidence interval.
+    n_bs_reps : int, default 1000
+        Number of bootstrap replicates to use in conf. int.
+
+    Returns
+    -------
+    output : Bokleh grid plot
+        Bokeh figure with subplots of all time series
+    """
+    # Get the categories
+    cats = df[category].unique()
+
+    # Make colors if not supplied
+    if colors is None:
+        colors = get_colors(cats)
+
+    # Check input stat
+    if summary_trace not in ['mean', 'median']:
+        raise RuntimeError("`summary` trace must be either 'mean' or 'median'")
+
+    # Convenient strings
+    low = 'low_' + signal
+    high = 'high_' + signal
+
+    # Create figures
+    p = canvas(df, identifier, height=height, width=width,
+               x_axis_label=x_axis_label, y_axis_label=y_axis_label,
+               light=light, time=time)
+
+    # Populate glyphs
+    for cat in cats:
+        print('Performing bootstrap estimates for {0:s}....'.format(cat))
+        sub_df = df.loc[df[category]==cat, :]
+        df_summ = ts_conf_int(
+                sub_df, signal, time, ptiles, stat=summary_trace,
+                time_ind=time_ind, size=n_bs_reps)
+
+        t, y_low = shift_time_points(df_summ[time], df_summ[low], time_shift)
+        t, y_high = shift_time_points(df_summ[time], df_summ[high], time_shift)
+        t, y = shift_time_points(df_summ[time], df_summ[signal], time_shift)
+
+        # Plot confidence interval
+        patch_t = np.concatenate((t, t[::-1]))
+        patch_y = np.concatenate((y_low, y_high[::-1]))
+        p.patch(patch_t, patch_y, color=colors[cat][0], fill_alpha=alpha,
+                line_join='bevel')
+
+        # Plot the summary line
+        summary_line = p.line(t, y, line_width=3, color=colors[cat][1],
+                              line_join='bevel', legend=cat)
+
+    return p
 
 
 def get_colors(cats):

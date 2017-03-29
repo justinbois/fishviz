@@ -335,9 +335,28 @@ def load_perl_processed_activity(activity_file, df_gt):
     return df
 
 
-def resample(df, ind_win, label='center'):
+def resample(df, ind_win):
     """
     Resample the DataFrame.
+
+    Parameters
+    ----------
+    df : pandas DataFrame
+        DataFrame with pertinent data. Must have columns 'time',
+        'fish', 'genotype', 'day', 'light', 'zeit'.
+
+    Returns
+    -------
+    output : pandas DataFrame
+        Resampled DataFrame.
+
+    Notes
+    -----
+    .. Assumes that the signal is aligned with the
+       *left* of the time interval. I.e., if df['zeit'] = [0, 1, 2],
+       the values of df['activity'] are assumed to be aggregated over
+       time intervals 0 to 1, 1 to 2, and 2 to 3. The same is true
+       for the outputted resampled array.
     """
     # Make a copy so as to leave original unperturbed
     df_in = df.copy()
@@ -378,6 +397,9 @@ def resample(df, ind_win, label='center'):
     # Compute rolling sum (result is stored at right end of window)
     s = df_gb.rolling(window=ind_win).sum().reset_index(level=0, drop='fish')
 
+    # Columns to keep in output DataFrame
+    new_cols = ['time', 'fish', 'genotype', 'day', 'light', 'zeit']
+
     # Inds to keep
     inds = np.array([])
     win_inds = np.array([])
@@ -394,7 +416,6 @@ def resample(df, ind_win, label='center'):
     zeit_ind = list(range(int(len(inds) // n_fish))) * n_fish
 
     # New DataFrame
-    new_cols = ['time', 'fish', 'genotype', 'day', 'light', 'zeit']
     df_resampled = df_in.loc[inds, new_cols].reset_index(drop=True)
     df_resampled['activity'] = s[win_inds].values
     df_resampled['zeit_ind'] = zeit_ind

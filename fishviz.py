@@ -41,6 +41,9 @@ if __name__ == '__main__':
     parser.add_argument('--summarystat', '-s', action='store',
                         dest='summary_trace', default='mean',
                         help="Which summary statistic to compute, choose from [mean, median, max, min, none], default is mean.")
+    parser.add_argument('--timeshift', '-S', action='store',
+                        dest='time_shift', default='left',
+                        help="Which part of time interval is used in plot; acceptable values: [left, right, center, interval], default is left.")
     parser.add_argument('--ignoregtype', '-i', action='store_true',
                         dest='ignore_gtype', default=False,
                         help="Ignore genotype information (genotype file still must be provided to determine which fish are analyze-able).")
@@ -85,12 +88,14 @@ if __name__ == '__main__':
                           light='light', time='zeit')
         p = tsplot.time_series_plot(p, df_resampled, 'fish', 'zeit',
                                     'activity', time_ind='zeit_ind', title=None,
-                                    summary_trace=args.summary_trace)
+                                    summary_trace=args.summary_trace,
+                                    time_shift=args.time_shift)
     else:
         p = tsplot.grid(df_resampled, 'fish', 'genotype', 'zeit', 'activity',
                         time_ind='zeit_ind', light='light',
                         x_axis_label='time (hr)', y_axis_label=y_axis_label,
-                        summary_trace=args.summary_trace)
+                        summary_trace=args.summary_trace,
+                        time_shift=args.time_shift)
 
     # Save HTML file
     bokeh.io.save(p)
